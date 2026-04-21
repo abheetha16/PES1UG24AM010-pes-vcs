@@ -193,9 +193,74 @@ int head_update(const ObjectID *new_commit) {
 //   - head_update       : moves the branch pointer to your new commit
 //
 // Returns 0 on success, -1 on error.
-int commit_create(const char *message, ObjectID *commit_id_out) {
-    // TODO: Implement commit creation
-    // (See Lab Appendix for logical steps)
-    (void)message; (void)commit_id_out;
-    return -1;
+int commit_create(const char *message, ObjectID *commit_id) {
+    if (!message || strlen(message) == 0) {
+        fprintf(stderr, "error: empty commit message\n");
+        return -1;
+    }
+
+    // 1. Build tree from index
+    ObjectID tree_id;
+    if (tree_from_index(&tree_id) != 0) {
+        fprintf(stderr, "error: failed to build tree from index\n");
+        return -1;
+    }
+
+    // 2. Read parent (HEAD)
+    ObjectID parent_id;
+    int has_parent = 0;
+    if (head_read(&parent_id) == 0) {
+        has_parent = 1;
+    }
+
+    // 3. Get author
+    const char *author = pes_author();
+    if (!author) {
+        fprintf(stderr, "error: author not set\n");
+        return -1;
+    }
+
+    // 4. Build commit text
+    char buffer[4096];
+    size_t offset = 0;
+
+    char tree_hex[HASH_HEX_SIZE + 1];
+    hash_to_hex(&tree_id, tree_hex);
+
+    offset += snprintf(buffer + offset, sizeof(buffer) - offset,
+                       "tree %s\n", tree_hex);
+
+    if (has_parent) {
+        char parent_hex[HASH_HEX_SIZE + 1];
+        hash_to_hex(&parent_id, parent_hex);
+
+        offset += snprintf(buffer + offset, sizeof(buffer) - offset,
+                           "parent %s\n", parent_hex);
+    }
+
+    offset += snprintf(buffer + offset, sizeof(buffer) - offset,
+                       "author %s\n\n", author);
+
+    offset += snprintf(buffer + offset, sizeof(buffer) - offset,
+                       "%s\n", message);
+
+    // Safety check (avoid overflow issues)
+    if (offset >= sizeof(buffer)) {
+        fprintf(stderr, "error: commit message too large\n");
+        return -1;
+    }
+
+    // 5. Write commit object
+    if (object_write(OBJ_COMMIT, buffer, offset, commit_id) != 0) {
+        fprintf(stderr, "error: failed to write commit object\n");
+        return -1;
+    }
+
+    // 6. Update HEAD
+    if (head_update(commit_id) != 0) {
+        fprintf(stderr, "error: failed to update HEAD\n");
+        return -1;
+    }
+
+    return 0;
 }
