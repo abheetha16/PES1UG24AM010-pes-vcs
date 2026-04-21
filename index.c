@@ -286,5 +286,4 @@ int index_save(const Index *index) {
     // Save index
     return index_save(index);
 }
-    return -1;
-}
+    
