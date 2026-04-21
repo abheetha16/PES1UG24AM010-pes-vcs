@@ -129,9 +129,87 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
+static int build_tree_from_dir(const char *dir_path, ObjectID *out_id) {
+    DIR *dir = opendir(dir_path);
+    if (!dir) return -1;
+
+    Tree tree = {0};
+    struct dirent *entry;
+
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip . and .. and .pes
+        if (strcmp(entry->d_name, ".") == 0 ||
+            strcmp(entry->d_name, "..") == 0 ||
+            strcmp(entry->d_name, ".pes") == 0)
+            continue;
+
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+        full_path[sizeof(full_path) - 1] = '\0';
+
+        TreeEntry *te = &tree.entries[tree.count++];
+
+        uint32_t mode = get_file_mode(full_path);
+        te->mode = mode;
+        strcpy(te->name, entry->d_name);
+
+        if (mode == MODE_DIR) {
+            // recurse
+            if (build_tree_from_dir(full_path, &te->hash) != 0) {
+                closedir(dir);
+                return -1;
+            }
+        } else {
+            // file → write blob
+            FILE *f = fopen(full_path, "rb");
+            if (!f) {
+                closedir(dir);
+                return -1;
+            }
+
+            fseek(f, 0, SEEK_END);
+            size_t len = ftell(f);
+            rewind(f);
+
+            void *data = malloc(len);
+            if (!data) {
+                fclose(f);
+                closedir(dir);
+                return -1;
+            }
+
+            if (fread(data, 1, len, f) != len) {   // ✅ PUT IT HERE
+                fclose(f);
+                free(data);
+                closedir(dir);
+                return -1;
+        }
+
+            fclose(f);
+
+            if (object_write(OBJ_BLOB, data, len, &te->hash) != 0) {
+                free(data);
+                closedir(dir);
+                return -1;
+            }
+
+            free(data);
+        }
+    }
+
+    closedir(dir);
+    void *data;
+    size_t len;
+
+    if (tree_serialize(&tree, &data, &len) != 0)
+        return -1;
+
+    int ret = object_write(OBJ_TREE, data, len, out_id);
+    free(data);
+
+    return ret;
+}
+
 int tree_from_index(ObjectID *id_out) {
-    // TODO: Implement recursive tree building
-    // (See Lab Appendix for logical steps)
-    (void)id_out;
-    return -1;
+    return build_tree_from_dir(".", id_out);
 }
